@@ -1,0 +1,313 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens — one dark kitchen: charcoal table, cream type, terracotta accents.
+ * amber: the neutral scale, written by role so the same class works in both themes:
+ *        50 page · 100 raised surface · 200 hairline · 300 strong border · 400–600 muted text
+ *        700 clay primary · 800 primary hover · 900 body text · 950 headings.
+ * sage:  the quiet secondary for calm surfaces and "free / good" states.
+ * clay:  decorative terracotta.
+ * ink / paper: fixed charcoal and cream for things laid over photographs.
+ * Add class "theme-light" to a block to render it as a cream sheet on the dark page.
+ */
+@theme inline {
+  --font-sans: var(--font-onest);
+  --font-serif: var(--font-literata);
+}
+
+@theme {
+  --color-ink: #2c2825;
+  --color-paper: #fdfbf7;
+
+  --color-amber-50: #2c2825;
+  --color-amber-100: #37322e;
+  --color-amber-200: #48413b;
+  --color-amber-300: #5e554d;
+  --color-amber-400: #857a6d;
+  --color-amber-500: #a39786;
+  --color-amber-600: #bfb19d;
+  --color-amber-700: #c86d51;
+  --color-amber-800: #db8a6f;
+  --color-amber-900: #ebe2d3;
+  --color-amber-950: #fdfbf7;
+
+  --color-sage-50: #30352d;
+  --color-sage-100: #3c4338;
+  --color-sage-200: #4e5848;
+  --color-sage-500: #8fa085;
+  --color-sage-600: #a6b59d;
+  --color-sage-700: #bcc8b4;
+  --color-sage-900: #e2e7dd;
+
+  --color-clay-100: #4d3027;
+  --color-clay-400: #c86d51;
+
+  --color-emerald-100: #3c4338;
+  --color-emerald-700: #a6b59d;
+  --color-emerald-800: #bcc8b4;
+  --color-rose-100: #4d3027;
+  --color-rose-800: #e6a48e;
+  --color-red-600: #c0392b;
+  --color-red-700: #f0897a;
+  --color-red-800: #f4a79b;
+
+  --radius-photo: 1.25rem;
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.2), 0 12px 32px -12px rgb(0 0 0 / 0.55);
+}
+
+:root {
+  color-scheme: dark;
+}
+
+.theme-light {
+  color-scheme: light;
+  --color-amber-50: #fdfbf7;
+  --color-amber-100: #f6f0e6;
+  --color-amber-200: #ebe2d3;
+  --color-amber-300: #d9ccb7;
+  --color-amber-400: #b5a690;
+  --color-amber-500: #8d8070;
+  --color-amber-600: #6b6157;
+  --color-amber-700: #ad5236;
+  --color-amber-800: #8e4129;
+  --color-amber-900: #47403a;
+  --color-amber-950: #2c2825;
+  --color-sage-50: #f2f4ef;
+  --color-sage-100: #e2e7dd;
+  --color-sage-200: #c9d2c2;
+  --color-sage-500: #6b7a63;
+  --color-sage-600: #566350;
+  --color-sage-700: #434d3e;
+  --color-sage-900: #2a3027;
+  --color-clay-100: #f7e4dc;
+  --color-emerald-100: #e2e7dd;
+  --color-emerald-700: #566350;
+  --color-emerald-800: #434d3e;
+  --color-rose-100: #f7e4dc;
+  --color-rose-800: #8e4129;
+  --color-red-700: #a12d21;
+  --color-red-800: #84241a;
+  color: var(--color-amber-950);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body {
+  background: var(--color-amber-50);
+  color: var(--color-amber-950);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-serif), Georgia, serif;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+::selection {
+  background-color: var(--color-clay-100);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-amber-700);
+  outline-offset: 2px;
+}
+
+button,
+[role="button"],
+a,
+summary,
+select {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Horizontal rails scroll without a visible scrollbar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Cards settle into place when a new set of rows appears. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+.rise {
+  animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes plate-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.plate-turn {
+  animation: plate-turn 120s linear infinite;
+}
+
+@keyframes menu-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+.menu-pop {
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+  animation: menu-pop 0.16s ease-out;
+}
+
+/* Guided cooking: stages slide in the direction you are travelling. */
+@keyframes stage-next {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+}
+@keyframes stage-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-48px);
+  }
+}
+.stage-next {
+  animation: stage-next 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.stage-prev {
+  animation: stage-prev 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* The big step number scales in as a stage begins. */
+@keyframes stage-number {
+  from {
+    opacity: 0;
+    transform: scale(0.6) translateY(10px);
+  }
+}
+.stage-number {
+  animation: stage-number 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+/* A finished timer breathes so it can be seen from across the kitchen. */
+@keyframes timer-alarm {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(200, 109, 81, 0));
+  }
+  50% {
+    transform: scale(1.035);
+    filter: drop-shadow(0 0 22px rgba(200, 109, 81, 0.75));
+  }
+}
+.timer-alarm {
+  animation: timer-alarm 1s ease-in-out infinite;
+}
+
+@keyframes confetti-fall {
+  from {
+    opacity: 1;
+    transform: translate3d(0, -12vh, 0) rotate(0deg);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(var(--drift, 0px), 100vh, 0) rotate(540deg);
+  }
+}
+.confetti {
+  animation: confetti-fall var(--fall, 3.5s) ease-in both;
+}
+
+@keyframes draw-check {
+  from {
+    stroke-dashoffset: 40;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.draw-check {
+  stroke-dasharray: 40;
+  animation: draw-check 0.6s 0.25s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-next,
+  .stage-prev,
+  .stage-number,
+  .timer-alarm,
+  .confetti,
+  .draw-check {
+    animation: none;
+  }
+}
+
+/* Top loading bar for page changes (components/layout/NavProgress). It waits a moment before showing,
+   so quick navigations don't flash it, then creeps towards the end until the page arrives. */
+.nav-progress-run {
+  width: 0;
+  opacity: 0;
+  animation: nav-progress-run 8s cubic-bezier(0.1, 0.7, 0.2, 1) 80ms forwards;
+}
+.nav-progress-done {
+  width: 100%;
+  animation: nav-progress-done 300ms ease-out forwards;
+}
+@keyframes nav-progress-run {
+  0% { width: 0; opacity: 1; }
+  15% { width: 45%; opacity: 1; }
+  100% { width: 92%; opacity: 1; }
+}
+@keyframes nav-progress-done {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-progress-run { animation: none; width: 60%; opacity: 1; }
+}
+
+/* Long words: Russian and Kazakh have single words wider than a small phone ("конфиденциальности" in a large
+   heading). Text breaks inside a word only when the word cannot fit a line on its own, and headings hyphenate
+   first (the page's lang attribute picks the language). `anywhere` also lets flex and grid items shrink below
+   such a word instead of pushing the page sideways. Tables are left alone so column labels stay whole. */
+@layer base {
+  h1, h2, h3, h4, p, li, dd, dt, label, blockquote, figcaption {
+    overflow-wrap: anywhere;
+  }
+  h1, h2, h3, h4 {
+    hyphens: auto;
+  }
+  table :is(p, li, label) {
+    overflow-wrap: normal;
+  }
+}

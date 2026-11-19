@@ -1,0 +1,202 @@
+"use server";
+
+import bcrypt from "bcryptjs";
+import { and, eq, ne } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import { db, schema } from "@/db";
+import { checkPassword, normalizeEmail } from "@/lib/auth-rules";
+import { parseInternational } from "@/lib/phone";
+import { isUsernameAllowed, normalizeUsername } from "@/lib/profile";
+import { getT } from "@/i18n/server";
+import { destroyOtherSessions, getCurrentUser, type CurrentUser } from "@/server/auth";
+import { TTL_MINUTES, createChallenge, verifyChallenge } from "@/server/challenges";
+import { DeliveryUnavailable, deliverCode } from "@/server/notify";
+import { WINDOW, allow, clear, peek, record } from "@/server/rate-limit";
+import { keyedHash } from "@/server/security";
+
+export interface AccountState {
+  error?: string;
+  ok?: string;
+  /** Set once a code has been sent: the form switches to asking for it. */
+  challengeId?: string;
+  sentTo?: string;
+}
+
+
+/**
+ * Every sensitive change asks for the current password. Wrong guesses are counted in the database
+ * (not in server memory, which serverless instances do not share), per account.
+ */
+async function confirmPassword(userId: string, password: string): Promise<AccountState | null> {
+  const t = await getT();
+  const key = keyedHash("pw", userId);
+  if ((await peek("pw-fail", key, WINDOW.quarterHour)) >= 5) {
+    return { error: t("acct.err.locked") };
+  }
+  const [row] = await db.select({ hash: schema.users.passwordHash }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+  if (row && (await bcrypt.compare(password, row.hash))) {
+    await clear("pw-fail", key);
+    return null;
+  }
+  await record("pw-fail", key);
+  return { error: t("acct.err.wrongPw") };
+}
+
+const profileSchema = z.object({
+  name: z.string().trim().min(2, "auth.err.name").max(80, "acct.err.nameLong"),
+  username: z.string().max(40),
+});
+
+export async function updateProfile(_: AccountState, formData: FormData): Promise<AccountState> {
+  const t = await getT();
+  const user = await getCurrentUser();
+  if (!user) return { error: t("acct.err.signedOut") };
+  const parsed = profileSchema.safeParse({ name: formData.get("name"), username: formData.get("username") ?? "" });
+  if (!parsed.success) return { error: t(parsed.error.issues[0].message) };
+
+  const username = normalizeUsername(parsed.data.username) || null;
+  if (username && !isUsernameAllowed(username)) {
+    return { error: t("acct.err.username") };
+  }
+
+  if (username) {
+    const [taken] = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(and(eq(schema.users.username, username), ne(schema.users.id, user.id)))
+      .limit(1);
+    if (taken) return { error: t("acct.err.usernameTaken") };
+  }
+
+  try {
+    await db.update(schema.users).set({ name: parsed.data.name, username }).where(eq(schema.users.id, user.id));
+  } catch {
+    // The unique index is the final word if two people pick the same name at once.
+    return { error: t("acct.err.usernameTaken") };
+  }
+  revalidatePath("/", "layout");
+  return { ok: t("profile.saved") };
+}
+
+const CANNOT_USE = "acct.err.cannotUse";
+const BAD_CODE = "auth.a.badCode";
+const changeSchema = z.object({ value: z.string().max(254), currentPassword: z.string().min(1, "acct.err.enterCurrentPw").max(72) });
+
+type ContactKind = "phone" | "email";
+
+/** What every contact change needs first: the current password, and a new value that is valid and free. */
+async function checkContactChange(kind: ContactKind, formData: FormData): Promise<{ error: string } | { user: CurrentUser; value: string }> {
+  const t = await getT();
+  const user = await getCurrentUser();
+  if (!user) return { error: t("acct.err.signedOut") };
+  const parsed = changeSchema.safeParse({ value: formData.get("value") ?? "", currentPassword: formData.get("currentPassword") });
+  if (!parsed.success) return { error: t(parsed.error.issues[0].message) };
+
+  const value = kind === "phone" ? (parseInternational(parsed.data.value)?.phone ?? null) : normalizeEmail(parsed.data.value);
+  if (!value) return { error: kind === "phone" ? t("acct.err.phone") : t("auth.err.email") };
+  if (value === (kind === "phone" ? user.phone : user.email)) return { error: kind === "phone" ? t("acct.err.sameNumber") : t("acct.err.sameEmail") };
+
+  if (!(await allow("contact-change", keyedHash("user", user.id), 6, WINDOW.hour))) return { error: t("auth.a.tooMany") };
+  const denied = await confirmPassword(user.id, parsed.data.currentPassword);
+  if (denied?.error) return { error: denied.error };
+
+  const [taken] = await db
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .where(kind === "phone" ? eq(schema.users.phone, value) : eq(schema.users.email, value))
+    .limit(1);
+  if (taken) return { error: t(CANNOT_USE) };
+  return { user, value };
+}
+
+/** Phone numbers are not confirmed by SMS for now: the current password is enough, and the number stays unverified. */
+export async function changePhone(_: AccountState, formData: FormData): Promise<AccountState> {
+  const t = await getT();
+  const checked = await checkContactChange("phone", formData);
+  if ("error" in checked) return checked;
+  try {
+    await db.update(schema.users).set({ phone: checked.value, phoneVerifiedAt: null }).where(eq(schema.users.id, checked.user.id));
+  } catch {
+    // The unique index is the final word if someone took the number a moment earlier.
+    return { error: t(CANNOT_USE) };
+  }
+  await destroyOtherSessions(checked.user.id);
+  revalidatePath("/", "layout");
+  return { ok: t("acct.phoneUpdated") };
+}
+
+/** Email step one: sends a code to the NEW address. Nothing changes yet. */
+export async function startEmailChange(_: AccountState, formData: FormData): Promise<AccountState> {
+  const t = await getT();
+  const checked = await checkContactChange("email", formData);
+  if ("error" in checked) return checked;
+  const { user, value } = checked;
+  if (!(await allow("send-dest", keyedHash("dest", value), 6, WINDOW.hour))) return { error: t("auth.a.tooMany") };
+
+  const created = await createChallenge({ purpose: "email_change", channel: "email", destination: value, userId: user.id });
+  try {
+    await deliverCode(value, created.code, "email_change", TTL_MINUTES.email, t);
+  } catch (e) {
+    await db.delete(schema.authChallenges).where(eq(schema.authChallenges.id, created.id));
+    console.error("email change delivery failed:", e instanceof Error ? e.message : "unknown");
+    return { error: e instanceof DeliveryUnavailable ? t("acct.err.deliveryDown") : t("auth.a.sendFailed") };
+  }
+  return { challengeId: created.id, sentTo: value };
+}
+
+/** Email step two: the code proves the person controls the new address, and only then does it replace the old one. */
+export async function confirmEmailChange(_: AccountState, formData: FormData): Promise<AccountState> {
+  const t = await getT();
+  const user = await getCurrentUser();
+  if (!user) return { error: t("acct.err.signedOut") };
+  const challengeId = String(formData.get("challengeId") ?? "");
+  const retry = { challengeId, sentTo: String(formData.get("sentTo") ?? "") };
+  if (!(await allow("verify-user", keyedHash("user", user.id), 20, WINDOW.hour))) return { ...retry, error: t("auth.a.tooMany") };
+
+  const row = await verifyChallenge(challengeId, String(formData.get("code") ?? "").trim(), "email_change");
+  // A code issued to one account must never complete a change on another.
+  if (!row || row.userId !== user.id || !row.destination) return { ...retry, error: t(BAD_CODE) };
+
+  try {
+    await db.update(schema.users).set({ email: row.destination, emailVerifiedAt: new Date() }).where(eq(schema.users.id, user.id));
+  } catch {
+    return { error: t(CANNOT_USE) };
+  }
+  await destroyOtherSessions(user.id);
+  revalidatePath("/", "layout");
+  return { ok: t("acct.emailVerified") };
+}
+
+const passwordSchema = z.object({
+  currentPassword: z.string().min(1, "acct.err.enterCurrentPw").max(72),
+  newPassword: z.string().min(8, "acct.err.newPwShort").max(200),
+  confirmPassword: z.string().max(72),
+});
+
+export async function changePassword(_: AccountState, formData: FormData): Promise<AccountState> {
+  const t = await getT();
+  const user = await getCurrentUser();
+  if (!user) return { error: t("acct.err.signedOut") };
+  const parsed = passwordSchema.safeParse({
+    currentPassword: formData.get("currentPassword"),
+    newPassword: formData.get("newPassword"),
+    confirmPassword: formData.get("confirmPassword") ?? "",
+  });
+  if (!parsed.success) return { error: t(parsed.error.issues[0].message) };
+  const { currentPassword, newPassword, confirmPassword: repeated } = parsed.data;
+  if (newPassword !== repeated) return { error: t("acct.err.pwMismatch") };
+  if (newPassword === currentPassword) return { error: t("acct.err.pwSame") };
+  const weak = checkPassword(newPassword, user.phone);
+  if (weak) return { error: t(weak) };
+
+  const denied = await confirmPassword(user.id, currentPassword);
+  if (denied) return denied;
+
+  await db.update(schema.users).set({ passwordHash: await bcrypt.hash(newPassword, 12), mustChangePassword: false }).where(eq(schema.users.id, user.id));
+  await destroyOtherSessions(user.id);
+  // A blogger who just replaced the temporary password from the admin goes straight on to the studio.
+  if (user.mustChangePassword && user.role !== "user") redirect(user.role === "admin" ? "/admin" : "/dashboard");
+  return { ok: t("acct.pwUpdated") };
+}

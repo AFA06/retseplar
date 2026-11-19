@@ -1,0 +1,42 @@
+import type { EditorInitial } from "@/components/dashboard/RecipeEditor";
+import type { RecipeForEdit } from "@/server/recipe-write";
+
+/** Maps stored recipe rows to the editor's string-based form state. */
+export function toEditorInitial({ recipe: r, ingredients, steps }: RecipeForEdit): EditorInitial {
+  return {
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    coverUrl: r.coverUrl,
+    galleryUrls: r.galleryUrls,
+    videoUrl: r.videoUrl ?? "",
+    secretNotes: r.secretNotes ?? "",
+    servings: String(r.servings),
+    prepTimeMinutes: String(r.prepTimeMinutes),
+    cookTimeMinutes: String(r.cookTimeMinutes),
+    difficulty: r.difficulty,
+    category: r.category,
+    calories: r.calories?.toString() ?? "",
+    proteinGrams: r.proteinGrams?.toString() ?? "",
+    fatGrams: r.fatGrams?.toString() ?? "",
+    carbGrams: r.carbGrams?.toString() ?? "",
+    isPremium: r.isPremium,
+    priceAmount: r.priceAmount ? String(r.priceAmount) : "",
+    tags: r.tags.join(", "),
+    status: r.status,
+    ingredients: ingredients.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit })),
+    steps: steps.map((s) => ({
+      id: s.id,
+      key: s.id,
+      title: s.title,
+      instruction: s.instruction,
+      isFree: s.isFree,
+      mediaUrl: s.mediaUrl ?? "",
+      videoUrl: s.videoUrl ?? "",
+      timerMinutes: s.timerSeconds ? String(Math.round(s.timerSeconds / 60)) : "",
+      temperatureCelsius: s.temperatureCelsius ? String(s.temperatureCelsius) : "",
+      tip: s.tip ?? "",
+      ingredientPositions: s.ingredientPositions.join(", "),
+    })),
+  };
+}
